@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam-test-app
+
+  State Machine to download Notice documents from EurLex
+
+Resources:
+  EurlexLoadNoticesStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        Comment: State macthing for the app that downloads NOTICE documents from EurLex
+        StartAt: IngestAlerter
+        States:
+          IngestAlerter:
+            Comment: Get updates from EurLex for particular date
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: IngestAlerter
+              Payload.$: "$"
+            Next: CheckNoticesLoaded
+          CheckNoticesLoaded:
+            Comment: Check evety notice in the list if it was loaded before
+            Type: Map
+            InputPath: "$.Payload"
+            ItemsPath: "$.items"
+            MaxConcurrency: 0
+            Iterator:
+              StartAt: IngestAlertFilter
+              States:
+                IngestAlertFilter:
+                  Type: Task
+                  Resource: arn:aws:states:::lambda:invoke
+                  Parameters:
+                    FunctionName: IngestAlertFilter
+                    Payload.$: "$"
+                  OutputPath: "$.Payload"
+                  Next: SkipDownloadedNotices
+                SkipDownloadedNotices:
+                  Comment: Skips or downloads a Notice for the given alert
+                  Type: Choice
+                  Choices:
+                    - Variable: "$.exists"
+                      BooleanEquals: false
+                      Next: DownloadNoticeFromEurlex
+                    - Variable: "$.exists"
+                      BooleanEquals: true
+                      Next: EndProcessing
+                DownloadNoticeFromEurlex:
+                  Type: Task
+                  Resource: arn:aws:states:::lambda:invoke
+                  Parameters:
+                    FunctionName: IngestMetadataDownloader
+                    Payload.$: "$"
+                  Next: EndProcessing
+                EndProcessing:
+                  Type: Succeed
+            End: true
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref IngestAlerter
+        - LambdaInvokePolicy:
+            FunctionName: !Ref IngestAlertFilter
+        - LambdaInvokePolicy:
+            FunctionName: !Ref IngestMetadataDownloader
+    DependsOn:
+      - IngestAlerter
+      - IngestAlertFilter
+      - IngestMetadataDownloader
+
+  EurlexDocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: eurlex_documents
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      KeySchema:
+        - AttributeName: cellarId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: cellarId
+          AttributeType: S
+
+  NoticesS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: qa-bucket
+
+  IngestAlerter:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: IngestAlerter
+      CodeUri: functions/ingest-alerter/
+      Handler: app.lambdaHandler
+      Runtime: nodejs12.x
+      Timeout: 30
+
+  IngestAlertFilter:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: IngestAlertFilter
+      CodeUri: functions/ingest_alert_filter/
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      Environment:
+        Variables:
+          INGEST_DYNAMODB_TABLE_NAME: !Ref EurlexDocumentsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EurlexDocumentsTable
+    DependsOn:
+      - EurlexDocumentsTable
+
+  IngestMetadataDownloader:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: IngestMetadataDownloader
+      CodeUri: functions/ingest_metadata_downloader/
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      Environment:
+        Variables:
+          INGEST_DYNAMODB_TABLE_NAME: !Ref EurlexDocumentsTable
+          INGEST_S3_BUCKET_NAME: !Ref NoticesS3Bucket
+      Timeout: 30
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EurlexDocumentsTable
+        - DynamoDBWritePolicy:
+            TableName: !Ref EurlexDocumentsTable
+        - S3CrudPolicy:
+            BucketName: !Ref NoticesS3Bucket
+    DependsOn:
+      - EurlexDocumentsTable
+      - NoticesS3Bucket
+
+Outputs:
+  EurlexLoadNoticesStateMachineArn:
+    Description: "ARN of the state machine that downloads Notices"
+    Value: !Ref EurlexLoadNoticesStateMachine

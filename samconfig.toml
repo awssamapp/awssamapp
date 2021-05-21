@@ -1,0 +1,10 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "eurlex-downloader"
+s3_bucket = "aws-sam-cli-managed-default-bucket"
+s3_prefix = "eurlex-downloader"
+region = "us-east-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"

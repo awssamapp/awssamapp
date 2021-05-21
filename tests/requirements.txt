@@ -1,0 +1,10 @@
+aws-sam-cli-local
+awscli-local
+awscli-plugin-endpoint
+boto3
+docker
+flake8
+localstack
+parameterized
+pytest
+pytest-cov

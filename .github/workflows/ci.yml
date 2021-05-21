@@ -1,0 +1,27 @@
+name: AWS SAM APP CI pipeline
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./tests/requirements.txt
+          pip install -r ./functions/ingest_alert_filter/requirements.txt
+          pip install -r ./functions/ingest_metadata_downloader/requirements.txt
